@@ -1,0 +1,123 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"log/slog"
+	"math"
+	"math/rand/v2"
+	"time"
+
+	"github.com/aranw/freq-demo/freqlogworkflow"
+	"go.temporal.io/sdk/client"
+)
+
+// Ornstein-Uhlenbeck parameters
+const (
+	mu    = 50.0 // Mean frequency (Hz)
+	theta = 0.1  // Speed of mean reversion
+	sigma = 0.05 // Volatility (Hz)
+	dt    = 0.05 // Time step in seconds (50 ms)
+)
+
+// FrequencyReading holds a timestamp and a frequency value
+type FrequencyReading struct {
+	Time      time.Time
+	Frequency float64
+}
+
+func main() {
+	// Create the client object just once per process
+	c, err := client.Dial(client.Options{})
+
+	if err != nil {
+		log.Fatalln("Unable to create Temporal client:", err)
+	}
+
+	defer c.Close()
+
+	// Initial frequency set to mean
+	X := mu
+
+	// Create a ticker that fires every 50 milliseconds
+	ticker := time.NewTicker(time.Duration(50) * time.Millisecond)
+	defer ticker.Stop()
+
+	// Batch variables
+	batchSize := 1000
+	batch := make([]freqlogworkflow.FrequencyReading, 0, batchSize)
+
+	for {
+		<-ticker.C
+
+		// Generate a standard normal random variable
+		eps := rand.NormFloat64()
+
+		// Update frequency using the Ornstein-Uhlenbeck formula
+		dX := theta*(mu-X)*dt + sigma*math.Sqrt(dt)*eps
+		X += dX
+
+		// Get the current timestamp
+		timestamp := time.Now()
+
+		// Create a FrequencyReading
+		reading := freqlogworkflow.FrequencyReading{
+			Time:      timestamp,
+			Frequency: X,
+		}
+
+		// Add the reading to the batch
+		batch = append(batch, reading)
+
+		// Check if batch is full
+		if len(batch) == batchSize {
+			// Process the batch
+			processBatch(c, batch)
+
+			// Reset the batch
+			batch = batch[:0]
+		}
+	}
+}
+
+// processBatch handles a batch of frequency readings
+func processBatch(c client.Client, batch []freqlogworkflow.FrequencyReading) {
+
+	input := freqlogworkflow.FrequencyBatch{
+		Readings: batch,
+	}
+
+	options := client.StartWorkflowOptions{
+		ID:        fmt.Sprintf("frequency-batch-%d", rand.Int32()),
+		TaskQueue: freqlogworkflow.FrequencyBatchTaskQueueName,
+	}
+
+	slog.Info("processing batch", "id", options.ID)
+
+	we, err := c.ExecuteWorkflow(context.Background(), options, freqlogworkflow.ProcessFrequencyBatch, input)
+	if err != nil {
+		log.Fatalln("Unable to start the Workflow:", err)
+	}
+
+	slog.Info("WorkflowID: %s RunID: %s\n", we.GetID(), we.GetRunID())
+
+	var result freqlogworkflow.FrequencyBatchResult
+
+	err = we.Get(context.Background(), &result)
+
+	if err != nil {
+		log.Fatalln("Unable to get Workflow result:", err)
+	}
+
+	// Example: Print batch size and first/last readings
+	fmt.Printf("Processing batch of %d readings\n", result.BatchSize)
+	fmt.Printf("First reading: Time %s, Frequency = %.5f Hz\n",
+		result.FirstReadingFrequencyTime.Format("15:04:05.000"), result.FirstReadingFrequency)
+	fmt.Printf("Last reading:  Time %s, Frequency = %.5f Hz\n",
+		result.LastReadingFrequencyTime.Format("15:04:05.000"), result.LastReadingFrequency)
+	fmt.Printf("Average Frequency:     %.5f Hz\n", result.AverageFrequency)
+	fmt.Printf("Minimum Frequency:     %.5f Hz\n", result.MinimumFrequency)
+	fmt.Printf("Maximum Frequency:     %.5f Hz\n", result.MaximumFrequency)
+	fmt.Printf("Standard Deviation:    %.5f Hz\n", result.StandardDeviation)
+}
