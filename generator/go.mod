@@ -3,7 +3,7 @@ module github.com/aranw/freq-demo/generator
 go 1.23.1
 
 require (
-	github.com/aranw/freq-demo/workflow v0.0.0-00010101000000-000000000000
+	github.com/aranw/freq-demo/workflow v0.0.0-20241007222752-31b6786dd8dd
 	go.temporal.io/sdk v1.29.1
 )
 
