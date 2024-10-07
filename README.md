@@ -15,12 +15,14 @@ The Frequency Demo project showcases the capabilities of Temporal.io in handling
 
 1. Start the Temporal worker for batch processing:
    ```
-   go run worker
+   cd ./worker
+   go run .
    ```
 
 2. Run the frequency data generator and batcher:
    ```
-   go run generator/cmd/generator
+   cd ./generator
+   go run ./cmd/generator
    ```
 
 ## Project Structure
